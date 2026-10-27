@@ -30,11 +30,16 @@ jobs:
         env:
           STATIC_BUILD: "1"
           BASE_PATH: /${{ github.event.repository.name }}/
-      - run: cp dist/client/index.html dist/client/404.html && touch dist/client/.nojekyll
+      - name: Collect static files
+        run: |
+          IDX=$(find dist .output -name index.html -not -path "*/server/*" 2>/dev/null | head -1)
+          echo "found $IDX"; test -n "$IDX"
+          rm -rf web && cp -r "$(dirname "$IDX")" web
+      - run: cp web/index.html web/404.html && touch web/.nojekyll
       - uses: actions/configure-pages@v5
         with: { enablement: true }
       - uses: actions/upload-pages-artifact@v3
-        with: { path: dist/client }
+        with: { path: web }
       - id: deploy
         uses: actions/deploy-pages@v4
 
@@ -50,6 +55,11 @@ jobs:
       - run: bun install
       - run: npx vite build
         env: { STATIC_BUILD: "1", BASE_PATH: / }
+      - name: Collect static files
+        run: |
+          IDX=$(find dist .output -name index.html -not -path "*/server/*" 2>/dev/null | head -1)
+          echo "found $IDX"; test -n "$IDX"
+          rm -rf web && cp -r "$(dirname "$IDX")" web
       - run: npx cap add android && npx cap sync android
       - name: Icon
         run: |
