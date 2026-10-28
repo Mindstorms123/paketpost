@@ -63,6 +63,20 @@ function Index() {
     } finally { setBusy(null); }
   };
 
+  const unlock = async (p: Parcel) => {
+    setBusy(p.id); setErr((e) => ({ ...e, [p.id]: "" }));
+    try {
+      const { unlockDpd } = await import("@/lib/dpd-detail");
+      const r = await unlockDpd(p.number, p.zip);
+      setParcels((all) => all.map((x) => x.id !== p.id ? x : {
+        ...x, events: r.events, checkedAt: Date.now(), status: r.status,
+        history: r.status !== x.status ? [{ status: r.status, at: Date.now() }, ...x.history] : x.history,
+      }));
+    } catch (e) {
+      setErr((s) => ({ ...s, [p.id]: e instanceof Error ? e.message : "Freischalten fehlgeschlagen" }));
+    } finally { setBusy(null); }
+  };
+
   useEffect(() => {
     const list = load();
     setParcels(list); setKeys(loadKeys()); setReady(true); setNative(isNative()); setMode(loadMode());
@@ -139,6 +153,11 @@ function Index() {
             Bei {c.name} ↗
           </a>
         </div>
+        {p.carrier === "dpd" && native && (
+          <button onClick={() => unlock(p)} disabled={busy === p.id} className="mt-2 w-full rounded-xl border py-2 text-sm font-semibold disabled:opacity-60">
+            🔓 Details freischalten (PLZ + Captcha bei DPD)
+          </button>
+        )}
         {err[p.id] && <p className="mt-2 text-xs text-destructive">{err[p.id]}</p>}
         {p.events && p.events.length > 0 && (
           <div className="mt-4">
