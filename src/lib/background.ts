@@ -43,18 +43,16 @@ export async function checkAll(): Promise<number> {
   return notes.length;
 }
 
-/** Starts the periodic background check (Android decides the exact timing, min. 15 min). */
+let timer: ReturnType<typeof setInterval> | undefined;
+/** Asks for notification permission and checks open parcels every 30 min while the app is running. */
 export async function startBackground(): Promise<void> {
   if (!isNative()) return;
-  const { LocalNotifications } = await import("@capacitor/local-notifications");
-  if (loadMode() !== "off") {
-    const p = await LocalNotifications.checkPermissions();
-    if (p.display !== "granted") await LocalNotifications.requestPermissions();
-  }
-  const { BackgroundFetch } = await import("@transistorsoft/capacitor-background-fetch");
-  await BackgroundFetch.configure(
-    { minimumFetchInterval: 30, stopOnTerminate: false, startOnBoot: true, enableHeadless: false, requiredNetworkType: BackgroundFetch.NETWORK_TYPE_ANY },
-    async (taskId) => { try { await checkAll(); } finally { BackgroundFetch.finish(taskId); } },
-    async (taskId) => BackgroundFetch.finish(taskId),
-  );
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    if (loadMode() !== "off") {
+      const p = await LocalNotifications.checkPermissions();
+      if (p.display !== "granted") await LocalNotifications.requestPermissions();
+    }
+  } catch { /* notifications unavailable – tracking still works */ }
+  if (!timer) timer = setInterval(() => { checkAll().catch(() => {}); }, 30 * 60 * 1000);
 }

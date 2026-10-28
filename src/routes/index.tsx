@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CARRIERS, STATUSES, byId, detectCarrier, load, save, type Parcel, type Status } from "@/lib/carriers";
 import { canRefresh, needsZip, fetchTracking, isNative, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
-import { APP_VERSION, checkUpdate } from "@/lib/update";
+import { APP_VERSION, checkUpdate, RELEASE_PAGE } from "@/lib/update";
 import { loadMode, saveMode, startBackground, type NotifyMode } from "@/lib/background";
 
 const KEY_FIELDS: { group: string; portal: string; fields: { k: keyof Keys; label: string }[] }[] = [
@@ -261,7 +261,8 @@ function Index() {
           <span>Version {APP_VERSION}</span>
           {native && <button className="underline" onClick={findUpdate}>Nach Update suchen</button>}
           {update && <span>{update}</span>}
-          {updateUrl && <a className="font-bold text-primary underline" href={updateUrl} target="_blank" rel="noopener noreferrer">Neue APK laden ↓</a>}
+          {updateUrl && <a className="font-bold text-primary underline" href={RELEASE_PAGE} target="_blank" rel="noopener noreferrer">Download-Seite öffnen ↗</a>}
+          {updateUrl && <span className="w-full">Auf der Seite „Paketpost.apk“ antippen und bei Chromes Warnung „Trotzdem herunterladen“ wählen.</span>}
         </div>
       </footer>
     </main>
