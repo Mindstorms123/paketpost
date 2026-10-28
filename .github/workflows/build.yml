@@ -72,9 +72,11 @@ jobs:
       - run: ./gradlew assembleDebug
         working-directory: android
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk Paketpost.apk
+      # A fresh tag per build so every build shows up as its own new release.
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Paketpost (neueste Version)
+          tag_name: v1.0.${{ github.run_number }}
+          name: Paketpost 1.0.${{ github.run_number }}
+          body: Neue Android-App. Paketpost.apk herunterladen und installieren.
           files: Paketpost.apk
           make_latest: true
