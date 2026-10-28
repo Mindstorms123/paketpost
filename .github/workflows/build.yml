@@ -69,9 +69,22 @@ jobs:
             done
           done
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml
-      - run: ./gradlew assembleDebug
+      # Rising version number so Android accepts the new APK as an update.
+      - name: Version
+        run: |
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+      - run: ./gradlew assembleRelease
         working-directory: android
-      - run: cp android/app/build/outputs/apk/debug/app-debug.apk Paketpost.apk
+      # Always signed with the same stored key, otherwise Android refuses updates.
+      - name: Sign
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KS_B64" | base64 -d > release.jks
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks release.jks --ks-key-alias paketpost --ks-pass env:KS_PW --key-pass env:KS_PW --out Paketpost.apk aligned.apk
       # A fresh tag per build so every build shows up as its own new release.
       - uses: softprops/action-gh-release@v2
         with:
