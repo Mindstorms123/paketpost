@@ -111,18 +111,34 @@ function Index() {
           </a>
         </div>
         {err[p.id] && <p className="mt-2 text-xs text-destructive">{err[p.id]}</p>}
-        {p.events?.[0] && !isOpen && (
-          <p className="mt-2 text-xs text-muted-foreground">{p.events[0].text}{p.events[0].place ? ` · ${p.events[0].place}` : ""}</p>
+        {p.events && p.events.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-2 text-sm font-bold">Sendungsverlauf</p>
+            <ol className="relative ml-2 border-l-2 border-primary/40">
+              {(isOpen ? p.events : p.events.slice(0, 3)).map((ev, i) => {
+                const d = new Date(ev.at);
+                const when = isNaN(d.getTime()) ? ev.at : d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                return (
+                  <li key={i} className="relative pb-3 pl-4 last:pb-0">
+                    <span className={`absolute -left-[7px] top-1 h-3 w-3 rounded-full border-2 border-primary ${i === 0 ? "bg-primary" : "bg-card"}`} />
+                    <p className={`text-xs font-bold ${i === 0 ? "" : "text-muted-foreground"}`}>
+                      {when}{ev.place ? `, ${ev.place}` : ""}
+                      {ev.place && (
+                        <a className="ml-1 font-normal underline" href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(ev.place)}`} target="_blank" rel="noopener noreferrer">Karte</a>
+                      )}
+                    </p>
+                    <p className={`text-sm ${i === 0 ? "" : "text-muted-foreground"}`}>{ev.text}</p>
+                  </li>
+                );
+              })}
+            </ol>
+            {!isOpen && p.events.length > 3 && (
+              <button className="mt-2 text-xs underline" onClick={() => setOpen(p.id)}>Alle {p.events.length} Schritte anzeigen</button>
+            )}
+          </div>
         )}
         {isOpen && (
           <div className="mt-4 space-y-4">
-            {p.events && p.events.length > 0 && (
-              <ol className="space-y-2 border-l-2 border-primary pl-3 text-xs">
-                {p.events.map((ev, i) => (
-                  <li key={i}><b>{ev.text}</b><br /><span className="text-muted-foreground">{new Date(ev.at).toLocaleString("de-DE")}{ev.place ? ` · ${ev.place}` : ""}</span></li>
-                ))}
-              </ol>
-            )}
             {p.checkedAt && <p className="text-xs text-muted-foreground">Zuletzt abgerufen: {new Date(p.checkedAt).toLocaleString("de-DE")}</p>}
             <div className="flex flex-wrap gap-1.5">
               {STATUSES.map((s) => (
