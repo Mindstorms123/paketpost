@@ -96,29 +96,42 @@ async function dhlPublic(n: string, zip?: string): Promise<TrackResult> {
   return { status: guessStatus(v.kurzStatus ?? v.aktuellerStatus ?? events[0]?.text ?? ""), events };
 }
 
-/** Parses DPD's app lookup answer ({ data: [{ lifecycle: { entries } }] }), newest step first. */
-export function parseDpd(d: any): TrackResult | null {
-  const entries: any[] = d?.data?.[0]?.lifecycle?.entries ?? [];
-  if (!entries.length) return null;
-  const at = (s: string) => /^\d{14}$/.test(s ?? "") ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}` : s;
-  const events = entries.map((e) => ({
-    at: at(e.datetime), text: e.state?.text ?? "",
-    place: Array.isArray(e.depotData) ? e.depotData.filter(Boolean).join(", ") || undefined : undefined,
-  }));
-  events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
-  return { status: guessStatus(events[0]?.text ?? ""), events };
+const DPD_STEPS = ["Start", "OnTheRoad", "DeliveryDepot", "CarLoad", "Delivered"];
+
+/** Reads the 5-step progress from DPD's public parcel page (my.dpd.de), newest step first. */
+export function parseDpdHtml(html: string, now = new Date()): TrackResult | null {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const txt = (id: string) => doc.getElementById(`ContentPlaceHolder1_${id}`)?.textContent?.trim() ?? "";
+  const current = txt("repParcelList_labDeliveryStatus_0");
+  const withYear = (d: string) => {
+    const m = d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})?$/);
+    if (!m) return d;
+    const day = m[1] ?? "", mon = m[2] ?? "", yr = m[3];
+    let y = yr ? +yr : now.getFullYear();
+    // A step date far in the future belongs to last year (e.g. December parcel viewed in January).
+    if (!yr && new Date(y, +mon - 1, +day).getTime() > now.getTime() + 7 * 864e5) y--;
+    return `${day.padStart(2, "0")}.${mon.padStart(2, "0")}.${y}`;
+  };
+  const events = DPD_STEPS
+    .map((s) => ({ text: txt(`labStatus${s}`), at: withYear(txt(`labStatus${s}Date`)) }))
+    .filter((e) => e.text && e.at)
+    .reverse();
+  if (!events.length && !current) return null;
+  return { status: guessStatus(current || events[0]?.text || ""), events };
 }
 
-/** DPD's old tracking address is gone; the myDPD app lookup answers with JSON (PLZ optional). */
-async function dpdPublic(n: string, zip?: string): Promise<TrackResult> {
-  const base = "https://www.mydpd.at/jws.php/parcel/";
-  const d = await http({
-    url: base + (zip ? "verify" : "search"), method: "POST",
-    headers: { ...UA, "Content-Type": "application/json" },
-    data: zip ? [n, zip] : n,
-  });
-  const r = parseDpd(d);
-  if (!r) throw new Error("DPD kennt diese Sendung (noch) nicht. Ggf. Empfänger-PLZ ergänzen.");
+/** DPD's old JSON address is gone; the public page needs its session cookie (kept by the native HTTP layer). */
+async function dpdPublic(n: string): Promise<TrackResult> {
+  const get = async (url: string) => {
+    const r = await CapacitorHttp.request({ method: "GET", url, headers: { ...UA, Accept: "text/html" }, responseType: "text" });
+    if (r.status >= 400) throw new Error(`Paketdienst antwortete mit Fehler ${r.status}`);
+    return typeof r.data === "string" ? r.data : String(r.data ?? "");
+  };
+  const q = encodeURIComponent(n);
+  let r = parseDpdHtml(await get(`https://my.dpd.de/redirect.aspx?action=12&parcelno=${q}`));
+  // Second try once the session cookie is set.
+  if (!r) r = parseDpdHtml(await get(`https://my.dpd.de/myParcel-tracking.aspx?parcelno=${q}`));
+  if (!r) throw new Error("DPD kennt diese Sendung (noch) nicht.");
   return r;
 }
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 vi.mock("@capacitor/core", () => ({ Capacitor: { isNativePlatform: () => false }, CapacitorHttp: { request: vi.fn() } }));
-import { parseDpd, needsZip } from "@/lib/tracking";
+import { parseDpdHtml } from "@/lib/tracking";
 import { isNewer } from "@/lib/update";
 
 describe("isNewer (app update check)", () => {
@@ -10,16 +12,17 @@ describe("isNewer (app update check)", () => {
   it("dev build is never compared as newer", () => expect(isNewer("1.0.6", "dev")).toBe(false));
 });
 
-describe("DPD", () => {
-  it("offers the PLZ field for DPD", () => expect(needsZip("dpd")).toBe(true));
-  it("parses steps newest first with place and status", () => {
-    const r = parseDpd({ data: [{ pno: "01405042934216", lifecycle: { entries: [
-      { datetime: "20261027101500", state: { text: "Paket an DPD übergeben" }, depotData: ["Depot Hamburg"] },
-      { datetime: "20261028081000", state: { text: "In Zustellung" }, depotData: ["Depot Berlin"] },
-    ] } }] });
-    expect(r?.events[0]).toEqual({ at: "2026-10-28T08:10:00", text: "In Zustellung", place: "Depot Berlin" });
-    expect(r?.status).toBe("In Zustellung");
-    expect(r?.events).toHaveLength(2);
+describe("DPD page", () => {
+  const html = readFileSync(path.join(__dirname, "fixtures/dpd-parcel.html"), "utf8");
+  const r = parseDpdHtml(html, new Date(2026, 9, 28, 10));
+  it("reads the current status", () => expect(r?.status).toBe("In Zustellung"));
+  it("lists only reached steps, newest first, with year", () => {
+    expect(r?.events.map((e) => e.at)).toEqual(["28.10.2026", "28.10.2026", "27.10.2026", "24.10.2026"]);
+    expect(r?.events[0]?.text).toBe("Paket in Zustellung");
   });
-  it("unknown parcel returns null", () => expect(parseDpd({ state: "failure" })).toBeNull());
+  it("December step viewed in January belongs to last year", () => {
+    const j = parseDpdHtml(html.replace(">24.10.<", ">30.12.<"), new Date(2027, 0, 3));
+    expect(j?.events.at(-1)?.at).toBe("30.12.2026");
+  });
+  it("unknown parcel page gives no result", () => expect(parseDpdHtml("<html><body>Leider keine Daten</body></html>")).toBeNull());
 });
