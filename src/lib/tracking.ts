@@ -96,12 +96,30 @@ async function dhlPublic(n: string, zip?: string): Promise<TrackResult> {
   return { status: guessStatus(v.kurzStatus ?? v.aktuellerStatus ?? events[0]?.text ?? ""), events };
 }
 
-async function dpdPublic(n: string): Promise<TrackResult> {
-  const d = await http({ url: `https://tracking.dpd.de/rest/plc/de_DE/${encodeURIComponent(n)}`, headers: UA });
-  const scans = d.parcellifecycleResponse?.parcelLifeCycleData?.scanInfo?.scan ?? [];
-  if (!scans.length) throw new Error("Sendung nicht gefunden");
-  const events = scans.map((s: any) => ({ at: s.date, text: (s.scanDescription?.content ?? []).join(" "), place: s.scanData?.location })).reverse();
+/** Parses DPD's app lookup answer ({ data: [{ lifecycle: { entries } }] }), newest step first. */
+export function parseDpd(d: any): TrackResult | null {
+  const entries: any[] = d?.data?.[0]?.lifecycle?.entries ?? [];
+  if (!entries.length) return null;
+  const at = (s: string) => /^\d{14}$/.test(s ?? "") ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}` : s;
+  const events = entries.map((e) => ({
+    at: at(e.datetime), text: e.state?.text ?? "",
+    place: Array.isArray(e.depotData) ? e.depotData.filter(Boolean).join(", ") || undefined : undefined,
+  }));
+  events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   return { status: guessStatus(events[0]?.text ?? ""), events };
+}
+
+/** DPD's old tracking address is gone; the myDPD app lookup answers with JSON (PLZ optional). */
+async function dpdPublic(n: string, zip?: string): Promise<TrackResult> {
+  const base = "https://www.mydpd.at/jws.php/parcel/";
+  const d = await http({
+    url: base + (zip ? "verify" : "search"), method: "POST",
+    headers: { ...UA, "Content-Type": "application/json" },
+    data: zip ? [n, zip] : n,
+  });
+  const r = parseDpd(d);
+  if (!r) throw new Error("DPD kennt diese Sendung (noch) nicht. Ggf. Empfänger-PLZ ergänzen.");
+  return r;
 }
 
 async function glsPublic(n: string): Promise<TrackResult> {
@@ -118,7 +136,7 @@ const PUBLIC: Record<string, (n: string, zip?: string) => Promise<TrackResult>> 
 
 /** Carriers the app can refresh itself (without or with optional keys). */
 export const canRefresh = (carrier: string) => carrier in PUBLIC || carrier in FETCHERS;
-export const needsZip = (carrier: string) => carrier === "dhl" || carrier === "post";
+export const needsZip = (carrier: string) => carrier === "dhl" || carrier === "post" || carrier === "dpd";
 
 export async function fetchTracking(carrier: string, n: string, k: Keys, zip?: string): Promise<TrackResult> {
   if (!canRefresh(carrier)) throw new Error("Dieser Paketdienst lässt sich nur über den Link abrufen.");
@@ -129,7 +147,11 @@ export async function fetchTracking(carrier: string, n: string, k: Keys, zip?: s
   const pub = PUBLIC[carrier];
   if (pub) {
     try { return await pub(n, zip); }
-    catch { throw new Error("Der Paketdienst hat die Abfrage abgelehnt. Bitte den Link nutzen."); }
+    catch (e) {
+      const m = e instanceof Error ? e.message : "";
+      if (/kennt|nicht gefunden/.test(m)) throw e;
+      throw new Error("Der Paketdienst hat die Abfrage abgelehnt. Bitte den Link nutzen.");
+    }
   }
   throw new Error("Für diesen Dienst ist ein eigener Zugang nötig (optional unter „Zugänge“).");
 }

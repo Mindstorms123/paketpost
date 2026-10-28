@@ -54,7 +54,7 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - run: bun install
       - run: npx vite build
-        env: { STATIC_BUILD: "1", BASE_PATH: / }
+        env: { STATIC_BUILD: "1", BASE_PATH: /, VITE_APP_VERSION: "1.0.${{ github.run_number }}" }
       - name: Collect static files
         run: |
           IDX=$(find dist .output -name index.html -not -path "*/server/*" 2>/dev/null | head -1)

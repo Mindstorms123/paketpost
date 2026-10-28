@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CARRIERS, STATUSES, byId, detectCarrier, load, save, type Parcel, type Status } from "@/lib/carriers";
-import { canRefresh, needsZip, fetchTracking, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
+import { canRefresh, needsZip, fetchTracking, isNative, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
+import { APP_VERSION, checkUpdate } from "@/lib/update";
 
 const KEY_FIELDS: { group: string; portal: string; fields: { k: keyof Keys; label: string }[] }[] = [
   { group: "DHL / Deutsche Post / DHL Express", portal: "https://developer.dhl.com", fields: [{ k: "dhlKey", label: "API-Key (Shipment Tracking – Unified)" }] },
@@ -45,21 +46,30 @@ function Index() {
   const [showKeys, setShowKeys] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<Record<string, string>>({});
+  const [native, setNative] = useState(false);
 
-  useEffect(() => { setParcels(load()); setKeys(loadKeys()); setReady(true); }, []);
-
-  const refresh = async (p: Parcel) => {
+  const refresh = async (p: Parcel, silent = false) => {
     setBusy(p.id); setErr((e) => ({ ...e, [p.id]: "" }));
     try {
-      const r = await fetchTracking(p.carrier, p.number, keys, p.zip);
+      const r = await fetchTracking(p.carrier, p.number, loadKeys(), p.zip);
       setParcels((all) => all.map((x) => x.id !== p.id ? x : {
         ...x, events: r.events, checkedAt: Date.now(), status: r.status,
         history: r.status !== x.status ? [{ status: r.status, at: Date.now() }, ...x.history] : x.history,
       }));
     } catch (e) {
-      setErr((s) => ({ ...s, [p.id]: e instanceof Error ? e.message : "Abruf fehlgeschlagen" }));
+      if (!silent || e instanceof Error) setErr((s) => ({ ...s, [p.id]: e instanceof Error ? e.message : "Abruf fehlgeschlagen" }));
     } finally { setBusy(null); }
   };
+
+  useEffect(() => {
+    const list = load();
+    setParcels(list); setKeys(loadKeys()); setReady(true); setNative(isNative());
+    // On app start: refresh open parcels once if their last check is older than 30 minutes.
+    if (!isNative()) return;
+    const due = list.filter((p) => p.status !== "Zugestellt" && canRefresh(p.carrier) && (!p.checkedAt || Date.now() - p.checkedAt > 30 * 60_000));
+    (async () => { for (const p of due) await refresh(p, true); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => { if (ready) save(parcels); }, [parcels, ready]);
 
   const detected = useMemo(() => detectCarrier(number), [number]);
@@ -70,8 +80,22 @@ function Index() {
     const n = number.replace(/\s+/g, "").toUpperCase();
     if (!n || !chosen) return;
     const now = Date.now();
-    setParcels([{ id: crypto.randomUUID(), number: n, carrier: chosen, label: label.trim() || byId(chosen).name, status: "Angekündigt", history: [{ status: "Angekündigt", at: now }], createdAt: now, zip: zip.trim() || undefined }, ...parcels]);
+    const p: Parcel = { id: crypto.randomUUID(), number: n, carrier: chosen, label: label.trim() || byId(chosen).name, status: "Angekündigt", history: [{ status: "Angekündigt", at: now }], createdAt: now, zip: zip.trim() || undefined };
+    setParcels([p, ...parcels]);
     setNumber(""); setLabel(""); setZip(""); setCarrier("");
+    // Load the full history right away instead of waiting for a tap on "Aktualisieren".
+    if (canRefresh(p.carrier) && isNative()) refresh(p, true);
+  };
+
+  const [update, setUpdate] = useState<string>("");
+  const [updateUrl, setUpdateUrl] = useState<string>("");
+  const findUpdate = async () => {
+    setUpdate("Suche…"); setUpdateUrl("");
+    try {
+      const u = await checkUpdate();
+      if (u) { setUpdate(`Neue Version ${u.latest} verfügbar.`); setUpdateUrl(u.apk); }
+      else setUpdate("Du hast die neueste Version.");
+    } catch (e) { setUpdate(e instanceof Error ? e.message : "Update-Suche fehlgeschlagen"); }
   };
 
   const setStatus = (id: string, status: Status) =>
@@ -210,10 +234,18 @@ function Index() {
 
       <footer className="mt-6 space-y-3 rounded-2xl border p-4 text-xs text-muted-foreground">
         <p>🔒 Daten liegen ausschließlich im Speicher dieses Geräts. Der Live-Status öffnet direkt die offizielle Seite des Paketdienstes – kein Zwischenhändler sieht deine Nummern.</p>
-        <p>📱 Als App installieren: in Chrome auf Android ⋮ → „App installieren“ / „Zum Startbildschirm“.</p>
+        {native
+          ? <p>📱 Update: neue APK einfach über die installierte App installieren – die alte App nicht löschen, sonst sind die gespeicherten Pakete weg.</p>
+          : <p>📱 Als App installieren: in Chrome auf Android ⋮ → „App installieren“ / „Zum Startbildschirm“.</p>}
         <div className="flex gap-4">
           <button className="underline" onClick={exportData}>Backup exportieren</button>
           <label className="cursor-pointer underline">Backup importieren<input type="file" accept="application/json" className="hidden" onChange={(e) => importData(e.target.files?.[0])} /></label>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3">
+          <span>Version {APP_VERSION}</span>
+          {native && <button className="underline" onClick={findUpdate}>Nach Update suchen</button>}
+          {update && <span>{update}</span>}
+          {updateUrl && <a className="font-bold text-primary underline" href={updateUrl} target="_blank" rel="noopener noreferrer">Neue APK laden ↓</a>}
         </div>
       </footer>
     </main>
