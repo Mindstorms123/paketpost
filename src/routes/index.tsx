@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CARRIERS, STATUSES, byId, detectCarrier, load, save, type Parcel, type Status } from "@/lib/carriers";
 import { canRefresh, needsZip, fetchTracking, isNative, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
 import { APP_VERSION, checkUpdate } from "@/lib/update";
+import { loadMode, saveMode, startBackground, type NotifyMode } from "@/lib/background";
 
 const KEY_FIELDS: { group: string; portal: string; fields: { k: keyof Keys; label: string }[] }[] = [
   { group: "DHL / Deutsche Post / DHL Express", portal: "https://developer.dhl.com", fields: [{ k: "dhlKey", label: "API-Key (Shipment Tracking – Unified)" }] },
@@ -47,6 +48,7 @@ function Index() {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<Record<string, string>>({});
   const [native, setNative] = useState(false);
+  const [mode, setMode] = useState<NotifyMode>("important");
 
   const refresh = async (p: Parcel, silent = false) => {
     setBusy(p.id); setErr((e) => ({ ...e, [p.id]: "" }));
@@ -63,7 +65,10 @@ function Index() {
 
   useEffect(() => {
     const list = load();
-    setParcels(list); setKeys(loadKeys()); setReady(true); setNative(isNative());
+    setParcels(list); setKeys(loadKeys()); setReady(true); setNative(isNative()); setMode(loadMode());
+    const reload = () => setParcels(load());
+    window.addEventListener("paketpost:updated", reload);
+    startBackground().catch(() => {});
     // On app start: refresh open parcels once if their last check is older than 30 minutes.
     if (!isNative()) return;
     const due = list.filter((p) => p.status !== "Zugestellt" && canRefresh(p.carrier) && (!p.checkedAt || Date.now() - p.checkedAt > 30 * 60_000));
@@ -241,6 +246,17 @@ function Index() {
           <button className="underline" onClick={exportData}>Backup exportieren</button>
           <label className="cursor-pointer underline">Backup importieren<input type="file" accept="application/json" className="hidden" onChange={(e) => importData(e.target.files?.[0])} /></label>
         </div>
+        {native && (
+          <div className="space-y-1 border-t pt-3">
+            <p className="font-bold text-foreground">🔔 Benachrichtigungen</p>
+            <div className="flex flex-wrap gap-1.5">
+              {([["off", "Aus"], ["important", "Nur wichtige"], ["all", "Jeder Schritt"]] as const).map(([m, l]) => (
+                <button key={m} onClick={() => { setMode(m); saveMode(m); startBackground().catch(() => {}); }} className={`rounded-full border px-3 py-1 ${mode === m ? "border-primary bg-primary text-primary-foreground" : "bg-background"}`}>{l}</button>
+              ))}
+            </div>
+            <p>Die App prüft offene Pakete etwa alle 30 Minuten selbst auf dem Handy. Kommen keine Meldungen: in den Android-Einstellungen die Akku-Optimierung für Paketpost ausschalten.</p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3">
           <span>Version {APP_VERSION}</span>
           {native && <button className="underline" onClick={findUpdate}>Nach Update suchen</button>}

@@ -5,4 +5,6 @@
 - [x] APK-Updates ohne Deinstallation (fester Schlüssel, Versionsanzeige, Update-Suche)
 - [x] Sendungsverlauf in der App anzeigen (Karte: nur Link pro Ort)
 - [x] Verlauf automatisch beim Hinzufügen und App-Start laden
-- [ ] DPD-Abruf mit echter Sendung prüfen – wartet auf eine DPD-Nummer vom Nutzer
+- [ ] DPD-Abruf auf dem Handy bestätigen (1.0.8) – wartet auf Rückmeldung des Nutzers
+- [ ] Hintergrundprüfung + Benachrichtigungen bei Paket-Updates
+- [ ] Weitere Dienste ohne Zugang prüfen (GLS, Hermes, …)
