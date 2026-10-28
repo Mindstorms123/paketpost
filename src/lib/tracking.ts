@@ -84,11 +84,52 @@ const FETCHERS: Record<string, (n: string, k: Keys) => Promise<TrackResult>> = {
   dhl, post: dhl, dhlexpress: dhl, ups, fedex, tnt: fedex, usps,
 };
 
-export async function fetchTracking(carrier: string, n: string, k: Keys): Promise<TrackResult> {
-  const f = FETCHERS[carrier];
-  const live = LIVE[carrier];
-  if (!f || !live) throw new Error("Dieser Paketdienst bietet keinen öffentlichen Zugang.");
-  if (live.fields.some((x) => !k[x])) throw new Error("Zugangsdaten fehlen – unter „Zugänge“ eintragen.");
+const UA = { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36", Accept: "application/json" };
+
+/** Reads the same public data the carrier's own tracking page loads – no key needed. */
+async function dhlPublic(n: string, zip?: string): Promise<TrackResult> {
+  const z = zip ? `&zip=${encodeURIComponent(zip)}&inputSearch=true` : "";
+  const d = await http({ url: `https://www.dhl.de/int-verfolgen/data/search?piececode=${encodeURIComponent(n)}&language=de${z}`, headers: UA });
+  const v = d.sendungen?.[0]?.sendungsdetails?.sendungsverlauf;
+  if (!v) throw new Error("Sendung nicht gefunden");
+  const events = (v.events ?? []).map((e: any) => ({ at: e.datum, text: e.status ?? e.ruecksendung ?? "", place: e.ort })).reverse();
+  return { status: guessStatus(v.kurzStatus ?? v.aktuellerStatus ?? events[0]?.text ?? ""), events };
+}
+
+async function dpdPublic(n: string): Promise<TrackResult> {
+  const d = await http({ url: `https://tracking.dpd.de/rest/plc/de_DE/${encodeURIComponent(n)}`, headers: UA });
+  const scans = d.parcellifecycleResponse?.parcelLifeCycleData?.scanInfo?.scan ?? [];
+  if (!scans.length) throw new Error("Sendung nicht gefunden");
+  const events = scans.map((s: any) => ({ at: s.date, text: (s.scanDescription?.content ?? []).join(" "), place: s.scanData?.location })).reverse();
+  return { status: guessStatus(events[0]?.text ?? ""), events };
+}
+
+async function glsPublic(n: string): Promise<TrackResult> {
+  const d = await http({ url: `https://gls-group.com/app/service/open/rest/DE/de/rstt001?match=${encodeURIComponent(n)}`, headers: UA });
+  const t = d.tuStatus?.[0];
+  if (!t) throw new Error("Sendung nicht gefunden");
+  const events = (t.history ?? []).map((h: any) => ({ at: `${h.date}T${h.time ?? "00:00:00"}`, text: h.evtDscr, place: h.address?.city }));
+  return { status: guessStatus(t.progressBar?.statusInfo === "DELIVERED" ? "delivered" : events[0]?.text ?? ""), events };
+}
+
+const PUBLIC: Record<string, (n: string, zip?: string) => Promise<TrackResult>> = {
+  dhl: dhlPublic, post: dhlPublic, dpd: dpdPublic, gls: glsPublic,
+};
+
+/** Carriers the app can refresh itself (without or with optional keys). */
+export const canRefresh = (carrier: string) => carrier in PUBLIC || carrier in FETCHERS;
+export const needsZip = (carrier: string) => carrier === "dhl" || carrier === "post";
+
+export async function fetchTracking(carrier: string, n: string, k: Keys, zip?: string): Promise<TrackResult> {
+  if (!canRefresh(carrier)) throw new Error("Dieser Paketdienst lässt sich nur über den Link abrufen.");
   if (!isNative()) throw new Error("Live-Abruf funktioniert nur in der Android-App (der Browser blockiert direkte Anfragen).");
-  return f(n, k);
+  const live = LIVE[carrier];
+  const hasKeys = live && live.fields.every((x) => k[x]);
+  if (hasKeys) return FETCHERS[carrier]!(n, k);
+  const pub = PUBLIC[carrier];
+  if (pub) {
+    try { return await pub(n, zip); }
+    catch { throw new Error("Der Paketdienst hat die Abfrage abgelehnt. Bitte den Link nutzen."); }
+  }
+  throw new Error("Für diesen Dienst ist ein eigener Zugang nötig (optional unter „Zugänge“).");
 }

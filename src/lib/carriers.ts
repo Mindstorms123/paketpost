@@ -49,6 +49,7 @@ export type Parcel = {
   createdAt: number;
   events?: { at: string; text: string; place?: string }[];
   checkedAt?: number;
+  zip?: string | undefined;
 };
 
 const KEY = "paketpost.parcels.v1";

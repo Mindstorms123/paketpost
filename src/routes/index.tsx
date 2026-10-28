@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CARRIERS, STATUSES, byId, detectCarrier, load, save, type Parcel, type Status } from "@/lib/carriers";
-import { LIVE, fetchTracking, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
+import { canRefresh, needsZip, fetchTracking, loadKeys, saveKeys, type Keys } from "@/lib/tracking";
 
 const KEY_FIELDS: { group: string; portal: string; fields: { k: keyof Keys; label: string }[] }[] = [
   { group: "DHL / Deutsche Post / DHL Express", portal: "https://developer.dhl.com", fields: [{ k: "dhlKey", label: "API-Key (Shipment Tracking – Unified)" }] },
@@ -37,6 +37,7 @@ function Index() {
   const [ready, setReady] = useState(false);
   const [number, setNumber] = useState("");
   const [label, setLabel] = useState("");
+  const [zip, setZip] = useState("");
   const [carrier, setCarrier] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
@@ -50,7 +51,7 @@ function Index() {
   const refresh = async (p: Parcel) => {
     setBusy(p.id); setErr((e) => ({ ...e, [p.id]: "" }));
     try {
-      const r = await fetchTracking(p.carrier, p.number, keys);
+      const r = await fetchTracking(p.carrier, p.number, keys, p.zip);
       setParcels((all) => all.map((x) => x.id !== p.id ? x : {
         ...x, events: r.events, checkedAt: Date.now(), status: r.status,
         history: r.status !== x.status ? [{ status: r.status, at: Date.now() }, ...x.history] : x.history,
@@ -69,8 +70,8 @@ function Index() {
     const n = number.replace(/\s+/g, "").toUpperCase();
     if (!n || !chosen) return;
     const now = Date.now();
-    setParcels([{ id: crypto.randomUUID(), number: n, carrier: chosen, label: label.trim() || byId(chosen).name, status: "Angekündigt", history: [{ status: "Angekündigt", at: now }], createdAt: now }, ...parcels]);
-    setNumber(""); setLabel(""); setCarrier("");
+    setParcels([{ id: crypto.randomUUID(), number: n, carrier: chosen, label: label.trim() || byId(chosen).name, status: "Angekündigt", history: [{ status: "Angekündigt", at: now }], createdAt: now, zip: zip.trim() || undefined }, ...parcels]);
+    setNumber(""); setLabel(""); setZip(""); setCarrier("");
   };
 
   const setStatus = (id: string, status: Status) =>
@@ -100,7 +101,7 @@ function Index() {
           </span>
         </button>
         <div className="mt-3 flex gap-2">
-          {LIVE[p.carrier] && (
+          {canRefresh(p.carrier) && (
             <button onClick={() => refresh(p)} disabled={busy === p.id} className="flex-1 rounded-xl bg-secondary py-2.5 text-sm font-bold text-secondary-foreground disabled:opacity-60">
               {busy === p.id ? "Lädt…" : "↻ Aktualisieren"}
             </button>
@@ -155,6 +156,7 @@ function Index() {
           <option value="">Paketdienst wählen…</option>
           {CARRIERS.map((c) => <option key={c.id} value={c.id}>{c.name}{c.id === detected ? " (erkannt)" : ""}</option>)}
         </select>
+        {needsZip(chosen) && <input value={zip} onChange={(e) => setZip(e.target.value)} inputMode="numeric" placeholder="Empfänger-PLZ (für Details, optional)" className="w-full rounded-xl bg-primary-foreground px-4 py-3 text-foreground outline-none" />}
         <button disabled={!number || !chosen} className="w-full rounded-xl bg-secondary py-3 font-bold text-secondary-foreground disabled:opacity-50">Paket hinzufügen</button>
       </form>
 
@@ -172,10 +174,10 @@ function Index() {
       )}
 
       <section className="mt-10 rounded-2xl border bg-card p-4">
-        <button onClick={() => setShowKeys(!showKeys)} className="w-full text-left font-display text-xl font-semibold">Zugänge für Live-Tracking {showKeys ? "▾" : "▸"}</button>
+        <button onClick={() => setShowKeys(!showKeys)} className="w-full text-left font-display text-xl font-semibold">Eigene Zugänge (optional) {showKeys ? "▾" : "▸"}</button>
         {showKeys && (
           <div className="mt-3 space-y-5 text-sm">
-            <p className="text-xs text-muted-foreground">Deine eigenen, kostenlosen Entwickler-Zugänge. Sie bleiben nur auf diesem Gerät, und die App fragt damit direkt beim Paketdienst an. Andere Dienste (DPD, Hermes, GLS, Amazon …) bieten Privatpersonen keinen Zugang, dafür gibt es den Link.</p>
+            <p className="text-xs text-muted-foreground">Nicht nötig: DHL, Deutsche Post, DPD und GLS ruft die App ohne Zugang direkt beim Paketdienst ab. Optional für UPS, FedEx, USPS oder falls DHL blockt – deine eigenen, kostenlosen Entwickler-Zugänge. Sie bleiben nur auf diesem Gerät, und die App fragt damit direkt beim Paketdienst an. Andere Dienste (DPD, Hermes, GLS, Amazon …) bieten Privatpersonen keinen Zugang, dafür gibt es den Link.</p>
             {KEY_FIELDS.map((g) => (
               <div key={g.group} className="space-y-1.5">
                 <div className="flex items-baseline justify-between"><b>{g.group}</b><a href={g.portal} target="_blank" rel="noopener noreferrer" className="text-xs underline">Zugang holen ↗</a></div>

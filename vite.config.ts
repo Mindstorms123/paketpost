@@ -7,7 +7,7 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 // STATIC_BUILD=1 produces a pure static SPA in dist/client (GitHub Pages + Android APK).
-const isStatic = process.env.STATIC_BUILD === "1";
+const isStatic = process.env["STATIC_BUILD"] === "1";
 
 export default defineConfig({
   tanstackStart: {
@@ -16,5 +16,5 @@ export default defineConfig({
     server: { entry: "server" },
     ...(isStatic ? { spa: { enabled: true, prerender: { outputPath: "/index.html" } } } : {}),
   },
-  ...(isStatic ? { vite: { base: process.env.BASE_PATH || "/" } } : {}),
+  ...(isStatic ? { vite: { base: process.env["BASE_PATH"] || "/" } } : {}),
 });
