@@ -22,3 +22,15 @@ describe("DPD detail page (after captcha)", () => {
   it("status from newest step", () => expect(r.status).toBe("In Zustellung"));
   it("page without history gives nothing", () => expect(parseDpdDetailText("Bitte PLZ eingeben")).toBeNull());
 });
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { readDpdPage } from "@/lib/dpd-detail";
+describe("DPD page with only the delivery window", () => {
+  const html = readFileSync(path.join(__dirname, "fixtures/dpd-parcel.html"), "utf8");
+  const r = readDpdPage("01497113012484\nIn Zustellung\nLieferzeit\nHeute, 12:42-13:12", html)!;
+  it("window first, then the basic steps", () => {
+    expect(r.events[0]?.text).toBe("Voraussichtliche Zustellung: Heute, 12:42–13:12 Uhr");
+    expect(r.events[1]?.text).toBe("Paket in Zustellung");
+  });
+});
